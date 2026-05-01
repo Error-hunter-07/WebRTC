@@ -10,6 +10,7 @@ const iceConfig = { iceServers: turnUrl ? [...iceServers, { urls: turnUrl, usern
 export function useMediaConnections(socket, roomId, members, localStream, mySocketId) {
   const [remoteStreams, setRemoteStreams] = useState(new Map());
   const peersRef = useRef(new Map());
+  const offeredPeers = useRef(new Set());
 
   const attachTracks = (pc, stream) => {
     if (!stream) return;
@@ -64,10 +65,12 @@ export function useMediaConnections(socket, roomId, members, localStream, mySock
     const myId = mySocketId || socket.id;
     members.forEach(m => {
       if (!m.socketId || m.socketId === myId) return;
+      if (offeredPeers.current.has(m.socketId)) return;
       const pc = ensurePeer(m.socketId);
       attachTracks(pc, localStream);
       const shouldOffer = myId < m.socketId;
       if (!shouldOffer || pc.signalingState !== 'stable') return;
+      offeredPeers.current.add(m.socketId);
       pc.createOffer()
         .then(offer => pc.setLocalDescription(offer).then(() => {
           socket.emit('media-offer', { offer, targetSocketId: m.socketId, roomId });
@@ -77,7 +80,7 @@ export function useMediaConnections(socket, roomId, members, localStream, mySock
   }, [socket, roomId, members, localStream, mySocketId]);
 
   useEffect(() => {
-    return () => { peersRef.current.forEach(({ pc }) => pc.close()); peersRef.current.clear(); };
+    return () => { peersRef.current.forEach(({ pc }) => pc.close()); peersRef.current.clear(); offeredPeers.current.clear(); };
   }, []);
 
   return { remoteStreams };

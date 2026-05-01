@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { toast } from '../components/Toast';
 
 export function useMediaDevices() {
   const [camOn, setCamOn] = useState(false);
@@ -30,7 +31,7 @@ export function useMediaDevices() {
       updateStream(nextTracks);
       setCamOn(true);
     } catch {
-      alert('Camera permission denied');
+      toast.error('Camera permission denied');
     }
   };
 
@@ -44,7 +45,7 @@ export function useMediaDevices() {
         updateStream(nextTracks);
         setMicMuted(false);
       } catch {
-        alert('Microphone permission denied');
+        toast.error('Microphone permission denied');
       }
       return;
     }
@@ -54,14 +55,22 @@ export function useMediaDevices() {
 
   useEffect(() => {
     if (!localStream || !micStreamRef.current) return;
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!audioCtxRef.current) audioCtxRef.current = new AudioContextClass();
+
+    let cancelled = false;
+    const ensureAnalyser = async () => {
+      if (audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume();
+      if (cancelled) return;
       const analyser = audioCtxRef.current.createAnalyser();
       analyser.fftSize = 256;
       const source = audioCtxRef.current.createMediaStreamSource(micStreamRef.current);
       source.connect(analyser);
       analyserRef.current = analyser;
-    }
+    };
+
+    ensureAnalyser();
 
     const interval = setInterval(() => {
       if (analyserRef.current) {
@@ -71,8 +80,11 @@ export function useMediaDevices() {
       }
     }, 100);
 
-    return () => clearInterval(interval);
-  }, [localStream]);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [localStream, micMuted]);
 
   useEffect(() => {
     return () => {

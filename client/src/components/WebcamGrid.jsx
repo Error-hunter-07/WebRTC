@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import styles from '../App.module.css';
+import { IconCrown, IconMicOff } from './Icons';
 
 function ParticipantTile({ participant }) {
   const videoRef = useRef(null);
@@ -18,12 +19,13 @@ function ParticipantTile({ participant }) {
       {participant.camOn && participant.stream ? (
         <video ref={videoRef} autoPlay playsInline muted={participant.isSelf} className={styles.tileVideo} />
       ) : (
-        <div className={styles.placeholder}>{participant.username.charAt(0).toUpperCase()}</div>
+        <div className={styles.placeholder}>{(participant.username || 'G').charAt(0).toUpperCase()}</div>
       )}
       {!participant.isSelf && participant.stream && <audio ref={audioRef} autoPlay playsInline className={styles.hidden} />}
-      {participant.micMuted && <div className={styles.micOff}>🔇</div>}
-      {participant.isSelf && <div className={styles.badge}>You</div>}
-      <div className={styles.label}>{participant.username}</div>
+      {participant.micMuted && <div className={styles.tileMutedBadge}><IconMicOff size={14} /></div>}
+      {participant.isHost && <div className={styles.tileHostBadge}><IconCrown size={10} /> Host</div>}
+      {participant.isSelf && <div className={styles.tileSelfBadge}>You</div>}
+      <div className={styles.tileLabel}>{participant.username}</div>
     </div>
   );
 }

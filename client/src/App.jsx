@@ -6,6 +6,7 @@ import { useMediaDevices } from './hooks/useMediaDevices';
 import { useMediaConnections } from './hooks/useMediaConnections';
 import LobbyScreen from './components/LobbyScreen';
 import RoomScreen from './components/RoomScreen';
+import { ToastContainer, toast } from './components/Toast';
 import styles from './App.module.css';
 
 export default function App() {
@@ -35,6 +36,7 @@ export default function App() {
   const webrtcRef = useRef(null);
   const mySocketIdRef = useRef('');
   const viewerInitRef = useRef(false);
+  const debugOpenRef = useRef(false);
 
   const { camOn, micMuted, localStream, toggleCam, toggleMic, speakingVolume } = useMediaDevices();
   const { remoteStreams } = useMediaConnections(socket, roomId, members, localStream, mySocketId);
@@ -108,7 +110,7 @@ export default function App() {
   };
 
   const onLeaveRoom = () => {
-    socket.emit('disconnect');
+    socket.disconnect();
     setJoined(false);
     setRoomId('');
     setMembers([]);
@@ -117,6 +119,7 @@ export default function App() {
     setStreamConnected(false);
     setStreamReady(false);
     viewerInitRef.current = false;
+    setTimeout(() => socket.connect(), 100);
   };
 
   const onFileSelect = (file) => {
@@ -145,6 +148,7 @@ export default function App() {
     navigator.clipboard.writeText(roomId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+    toast.success('Room code copied!');
   };
 
   const onQualityChange = async (quality, fps) => {
@@ -166,6 +170,10 @@ export default function App() {
     setMediaState(mySocketIdRef.current, { camOn: nextOn });
     socket.emit('cam-state', { on: nextOn, roomId });
   };
+
+  useEffect(() => {
+    debugOpenRef.current = debugOpen;
+  }, [debugOpen]);
 
   useEffect(() => {
     const onRoomJoined = (data) => {
@@ -197,6 +205,7 @@ export default function App() {
       setStreamConnected(false);
       setStreamReady(false);
       viewerInitRef.current = false;
+      toast.info('Host disconnected. Reassigning...');
     };
 
     const onChat = (data) => {
@@ -258,14 +267,17 @@ export default function App() {
     webrtcRef.current?.closeAll();
     webrtcRef.current = new WebRTCManager(socket, isHost, {
       onPeerCountChange: setViewerCount,
-      onStreamReceived: () => setStreamConnected(true),
+      onStreamReceived: () => {
+        setStreamConnected(true);
+        toast.success('Stream connected ✓');
+      },
       onConnectionFailed: (msg) => setError(msg)
     });
     webrtcRef.current.setRoomId(roomId);
 
 
     const debugInterval = setInterval(async () => {
-      if (webrtcRef.current && debugOpen) {
+      if (webrtcRef.current && debugOpenRef.current) {
         const peers = await webrtcRef.current.collectStats();
         setDebugPeers(peers);
       }
@@ -307,6 +319,7 @@ export default function App() {
   if (!joined) {
     return (
       <div className={styles.shell}>
+        <ToastContainer />
         <LobbyScreen
           onCreateRoom={onCreateRoom}
           onJoinRoom={onJoinRoom}
@@ -318,6 +331,7 @@ export default function App() {
 
   return (
     <div className={styles.shell}>
+      <ToastContainer />
       {error && <div className={styles.errorBanner}>{error}</div>}
       <RoomScreen
         roomId={roomId}
