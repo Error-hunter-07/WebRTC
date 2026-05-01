@@ -43,15 +43,15 @@ export default function RoomScreen({
         : 'Waiting for host to load video...';
 
   React.useEffect(() => {
-    if (!chatOpen && messages.length > 0) {
+    if (chatOpen) {
+      setUnreadChat(0);
+    } else if (messages.length > 0) {
       const last = messages[messages.length - 1];
-      if (last?.socketId !== mySocketId) setUnreadChat(c => c + 1);
+      if (last?.socketId !== mySocketId) {
+        setUnreadChat(prev => Math.max(1, prev + 1));
+      }
     }
   }, [messages, chatOpen, mySocketId]);
-
-  React.useEffect(() => {
-    if (chatOpen) setUnreadChat(0);
-  }, [chatOpen]);
 
   useEffect(() => {
     const v = videoRef?.current;
@@ -121,7 +121,11 @@ export default function RoomScreen({
           <ToolbarButton
             icon={<IconMessageCircle size={18} />}
             title="Chat"
-            onClick={() => setChatOpen(!chatOpen)}
+            onClick={() => {
+              const nextOpen = !chatOpen;
+              setChatOpen(nextOpen);
+              if (nextOpen) setUnreadChat(0);
+            }}
           >
             {unreadChat > 0 && <span className={styles.badgeDot} />}
           </ToolbarButton>

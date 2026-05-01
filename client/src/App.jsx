@@ -51,18 +51,19 @@ export default function App() {
 
   const generateParticipants = () => {
     return members.map(m => {
-      const stream = remoteStreams.get(m.socketId);
+      const isSelf = m.socketId === mySocketIdRef.current;
+      const stream = isSelf ? localStream : remoteStreams.get(m.socketId);
       const state = mediaStates[m.socketId] || {};
       const remoteCamOn = stream ? stream.getVideoTracks().length > 0 : false;
       return {
         socketId: m.socketId,
         username: m.username,
         isHost: m.isHost,
-        isSelf: m.socketId === mySocketIdRef.current,
+        isSelf,
         stream,
-        camOn: m.socketId === mySocketIdRef.current ? camOn : (state.camOn ?? remoteCamOn),
-        micMuted: m.socketId === mySocketIdRef.current ? micMuted : (state.micMuted ?? false),
-        speakingVolume: m.socketId === mySocketIdRef.current ? speakingVolume : 0
+        camOn: isSelf ? camOn : (state.camOn ?? remoteCamOn),
+        micMuted: isSelf ? micMuted : (state.micMuted ?? false),
+        speakingVolume: isSelf ? speakingVolume : 0
       };
     });
   };

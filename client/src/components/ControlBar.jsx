@@ -59,7 +59,6 @@ export default function ControlBar({ videoRef, isHost, onQualityChange }) {
     onQualityChange?.(q, parseInt(f, 10));
   };
 
-  const hostDisabled = !isHost;
   const barBtn = (label, onClick, icon, disabled = false, className = '') => (
     <button onClick={onClick} title={label} disabled={disabled} className={`${styles.ctrlBtn} ${className}`}>{icon}</button>
   );
@@ -74,26 +73,34 @@ export default function ControlBar({ videoRef, isHost, onQualityChange }) {
           value={currentTime}
           onChange={e => seekTo(parseFloat(e.target.value))}
           className={styles.seekSlider}
-          disabled={hostDisabled}
+          disabled={!duration}
         />
       </div>
       <div className={styles.ctrlRow}>
         <div className={styles.ctrlLeft}>
-          {barBtn('Back 10s', () => skip(-1), <IconSkipBack10 size={18} />, hostDisabled)}
-          {barBtn(playing ? 'Pause' : 'Play', togglePlay, playing ? <IconPause size={18} /> : <IconPlay size={18} />, hostDisabled, styles.ctrlBtnLg)}
-          {barBtn('Forward 10s', () => skip(1), <IconSkipForward10 size={18} />, hostDisabled)}
+          {barBtn('Back 10s', () => skip(-1), <IconSkipBack10 size={18} />, !duration)}
+          {barBtn(playing ? 'Pause' : 'Play', togglePlay, playing ? <IconPause size={18} /> : <IconPlay size={18} />, !duration, styles.ctrlBtnLg)}
+          {barBtn('Forward 10s', () => skip(1), <IconSkipForward10 size={18} />, !duration)}
           <span className={styles.timeDisplay}>{formatTime(currentTime)} / {formatTime(duration)}</span>
         </div>
         <div className={styles.ctrlCenter} />
         <div className={styles.ctrlRight}>
           <input type="range" min="0" max="1" step="0.1" value={volume} onChange={e => changeVol(parseFloat(e.target.value))} className={styles.volumeSlider} />
           {barBtn(volume > 0 ? 'Mute' : 'Unmute', () => changeVol(volume > 0 ? 0 : 1), volume > 0 ? <IconVolume2 size={16} /> : <IconVolumeX size={16} />)}
-          <select value={qualityValue} onChange={e => qualChange(e.target.value)} className={styles.dropdown} disabled={!isHost}>
-            <option value="1080p-60">1080p·60fps</option>
-            <option value="720p-30">720p·30fps</option>
-            <option value="480p-30">480p·30fps</option>
-            <option value="360p-24">360p·24fps</option>
-          </select>
+          {isHost ? (
+            <select value={qualityValue} onChange={e => qualChange(e.target.value)} className={styles.dropdown}>
+              <option value="4k-60">4K·60fps</option>
+              <option value="1440p-60">1440p·60fps</option>
+              <option value="1080p-60">1080p·60fps</option>
+              <option value="1080p-30">1080p·30fps</option>
+              <option value="720p-60">720p·60fps</option>
+              <option value="720p-30">720p·30fps</option>
+              <option value="480p-30">480p·30fps</option>
+              <option value="360p-24">360p·24fps</option>
+            </select>
+          ) : (
+            <span className={styles.qualityBadge}>Adaptive</span>
+          )}
           {barBtn('Fullscreen', fullscreen, <IconMaximize size={16} />)}
         </div>
       </div>
