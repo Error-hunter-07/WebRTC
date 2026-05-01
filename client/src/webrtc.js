@@ -151,4 +151,29 @@ export class WebRTCManager {
     if (!peer) return;
     try { await peer.pc.addIceCandidate(data.candidate); } catch {}
   }
+
+  async setQuality(quality, fps = 30) {
+    if (!this.isHost || !this.video || !this.canCapture(this.video)) return;
+    const qualMap = { '1080p': 1, '720p': 1.5, '480p': 2.25, '360p': 3 };
+    const bitrateMap = { '1080p': 8000000, '720p': 4000000, '480p': 1500000, '360p': 800000 };
+    const scale = qualMap[quality] || 1.5, maxBitrate = bitrateMap[quality] || 4000000;
+    try {
+      this.localStream = this._capture(this.video);
+      const videoTrack = this.localStream?.getVideoTracks()[0];
+      if (!videoTrack) return;
+      for (const { pc, senders } of this.peers.values()) {
+        const videoSender = senders.find(s => s.track?.kind === 'video');
+        if (videoSender?.setParameters) {
+          const params = videoSender.getParameters();
+          if (params.encodings) {
+            params.encodings[0].scaleResolutionDownBy = scale;
+            params.encodings[0].maxBitrate = maxBitrate;
+            params.encodings[0].maxFramerate = fps;
+            await videoSender.setParameters(params);
+          }
+        }
+        if (videoSender?.replaceTrack) await videoSender.replaceTrack(videoTrack);
+      }
+    } catch (e) { console.error('setQuality error:', e); }
+  }
 }

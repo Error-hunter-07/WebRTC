@@ -115,6 +115,32 @@ io.on('connection', socket => {
     io.to(data.targetSocketId).emit('webrtc-ice', { ...data, fromSocketId: socket.id });
   });
 
+  socket.on('media-offer', data => {
+    if (!data?.targetSocketId) return;
+    io.to(data.targetSocketId).emit('media-offer', { ...data, fromSocketId: socket.id });
+  });
+
+  socket.on('media-answer', data => {
+    if (!data?.targetSocketId) return;
+    io.to(data.targetSocketId).emit('media-answer', { ...data, fromSocketId: socket.id });
+  });
+
+  socket.on('media-ice', data => {
+    if (!data?.targetSocketId) return;
+    io.to(data.targetSocketId).emit('media-ice', { ...data, fromSocketId: socket.id });
+  });
+
+  socket.on('cam-state', data => {
+    const roomId = data?.roomId || roomForSocket.get(socket.id);
+    if (!roomId) return;
+    socket.to(roomId).emit('cam-state', { ...data, socketId: socket.id });
+  });
+
+  socket.on('mic-state', data => {
+    const roomId = data?.roomId || roomForSocket.get(socket.id);
+    if (!roomId) return;
+    socket.to(roomId).emit('mic-state', { ...data, socketId: socket.id });
+  });
   socket.on('host-stream-ready', data => {
     const roomId = data?.roomId || roomForSocket.get(socket.id);
     const room = roomId && getRoom(roomId);

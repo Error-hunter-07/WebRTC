@@ -1,47 +1,356 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import socket from './socket';
 import { SyncEngine } from './sync';
 import { WebRTCManager } from './webrtc';
+import { useMediaDevices } from './hooks/useMediaDevices';
+import { useMediaConnections } from './hooks/useMediaConnections';
+import LobbyScreen from './components/LobbyScreen';
+import RoomScreen from './components/RoomScreen';
 import styles from './App.module.css';
 
 export default function App() {
-  const videoRef = useRef(null), syncRef = useRef(null), rtcRef = useRef(null), urlRef = useRef(''), roomRef = useRef(''), hostRef = useRef(false), hbRef = useRef(0), viewerInitRef = useRef(false), hostInitRef = useRef(false);
-  const [username, setUsername] = useState(''), [joinRoomId, setJoinRoomId] = useState(''), [roomId, setRoomId] = useState(''), [isHost, setIsHost] = useState(false), [joined, setJoined] = useState(false), [members, setMembers] = useState([]), [messages, setMessages] = useState([]), [message, setMessage] = useState(''), [syncText, setSyncText] = useState('In sync'), [hostLoaded, setHostLoaded] = useState(false), [hostLeft, setHostLeft] = useState(false), [videoSrc, setVideoSrc] = useState(''), [me, setMe] = useState(socket.id || ''), [copied, setCopied] = useState(false), [error, setError] = useState(''), [streamConnected, setStreamConnected] = useState(false), [manualFallback, setManualFallback] = useState(false), [viewerCount, setViewerCount] = useState(0), [debugOpen, setDebugOpen] = useState(false), [debugPeers, setDebugPeers] = useState([]), [debugStats, setDebugStats] = useState([]);
+  const [roomId, setRoomId] = useState('');
+  const [joined, setJoined] = useState(false);
+  const [isHost, setIsHost] = useState(false);
+  const [members, setMembers] = useState([]);
+  const [videoSrc, setVideoSrc] = useState('');
+  const [streamConnected, setStreamConnected] = useState(false);
+  const [hostLoaded, setHostLoaded] = useState(false);
+  const [streamReady, setStreamReady] = useState(false);
+  const [manualFallback, setManualFallback] = useState(false);
+  const [syncText, setSyncText] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [username, setUsername] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState('');
+  const [hostLeft, setHostLeft] = useState(false);
+  const [viewerCount, setViewerCount] = useState(0);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugPeers, setDebugPeers] = useState([]);
+  const [mediaStates, setMediaStates] = useState({});
+  const [mySocketId, setMySocketId] = useState('');
 
-  useEffect(() => { roomRef.current = roomId; hostRef.current = isHost; }, [roomId, isHost]);
-  useEffect(() => { const key = e => { if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'd') { e.preventDefault(); setDebugOpen(v => !v); } }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, []);
+  const videoRef = useRef(null);
+  const syncEngineRef = useRef(null);
+  const webrtcRef = useRef(null);
+  const mySocketIdRef = useRef('');
+  const viewerInitRef = useRef(false);
+
+  const { camOn, micMuted, localStream, toggleCam, toggleMic, speakingVolume } = useMediaDevices();
+  const { remoteStreams } = useMediaConnections(socket, roomId, members, localStream, mySocketId);
+
+  const setMediaState = (socketId, next) => {
+    if (!socketId) return;
+    setMediaStates(prev => ({
+      ...prev,
+      [socketId]: { ...prev[socketId], ...next }
+    }));
+  };
+
+  const generateParticipants = () => {
+    return members.map(m => {
+      const stream = remoteStreams.get(m.socketId);
+      const state = mediaStates[m.socketId] || {};
+      const remoteCamOn = stream ? stream.getVideoTracks().length > 0 : false;
+      return {
+        socketId: m.socketId,
+        username: m.username,
+        isHost: m.isHost,
+        isSelf: m.socketId === mySocketIdRef.current,
+        stream,
+        camOn: m.socketId === mySocketIdRef.current ? camOn : (state.camOn ?? remoteCamOn),
+        micMuted: m.socketId === mySocketIdRef.current ? micMuted : (state.micMuted ?? false),
+        speakingVolume: m.socketId === mySocketIdRef.current ? speakingVolume : 0
+      };
+    });
+  };
+
+  const onCreateRoom = async (uname) => {
+    setUsername(uname);
+    setError('');
+    try {
+      const result = await new Promise((res, rej) => {
+        socket.emit('create-room', { username: uname }, r => r?.ok ? res(r) : rej(new Error(r?.error || 'Failed')));
+      });
+      mySocketIdRef.current = socket.id;
+      setMySocketId(socket.id);
+      setRoomId(result.roomId);
+      setMembers(result.members);
+      setIsHost(true);
+      setJoined(true);
+      setStreamReady(false);
+      setStreamConnected(false);
+      viewerInitRef.current = false;
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const onJoinRoom = async (uname, rid) => {
+    setUsername(uname);
+    setError('');
+    try {
+      const result = await new Promise((res, rej) => {
+        socket.emit('join-room', { username: uname, roomId: rid }, r => r?.ok ? res(r) : rej(new Error(r?.error || 'Failed')));
+      });
+      mySocketIdRef.current = socket.id;
+      setMySocketId(socket.id);
+      setRoomId(result.roomId);
+      setMembers(result.members);
+      setIsHost(result.hostId === socket.id);
+      setJoined(true);
+      setStreamReady(!!result.streamReady);
+      setStreamConnected(false);
+      viewerInitRef.current = false;
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const onLeaveRoom = () => {
+    socket.emit('disconnect');
+    setJoined(false);
+    setRoomId('');
+    setMembers([]);
+    setMessages([]);
+    setHostLeft(false);
+    setStreamConnected(false);
+    setStreamReady(false);
+    viewerInitRef.current = false;
+  };
+
+  const onFileSelect = (file) => {
+    if (!videoRef.current || !file) return;
+    const url = URL.createObjectURL(file);
+    setVideoSrc(url);
+    setManualFallback(false);
+    setHostLoaded(false);
+    setStreamConnected(false);
+    setStreamReady(false);
+    videoRef.current.srcObject = null;
+    videoRef.current.src = url;
+    videoRef.current.onloadedmetadata = () => {
+      const ok = webrtcRef.current?.initHost(videoRef.current, roomId);
+      if (!ok) setManualFallback(true);
+      videoRef.current?.play?.().catch(() => {});
+    };
+  };
+
+  const onSendMessage = (text) => {
+    if (!text.trim() || !joined) return;
+    socket.emit('chat', { text: text.trim(), roomId });
+  };
+
+  const onCopyRoom = () => {
+    navigator.clipboard.writeText(roomId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const onQualityChange = async (quality, fps) => {
+    if (webrtcRef.current) {
+      await webrtcRef.current.setQuality(quality, fps);
+    }
+  };
+
+  const onToggleMic = () => {
+    toggleMic();
+    const nextMuted = !micMuted;
+    setMediaState(mySocketIdRef.current, { micMuted: nextMuted });
+    socket.emit('mic-state', { muted: nextMuted, roomId });
+  };
+
+  const onToggleCam = () => {
+    toggleCam();
+    const nextOn = !camOn;
+    setMediaState(mySocketIdRef.current, { camOn: nextOn });
+    socket.emit('cam-state', { on: nextOn, roomId });
+  };
 
   useEffect(() => {
-    const onConnect = () => setMe(socket.id || '');
-    socket.on('connect', onConnect);
-    socket.on('room-joined', d => { setRoomId(d.roomId); setMembers(d.members || []); setJoined(true); setIsHost(d.hostId === socket.id); setHostLoaded(!!d.streamReady); setHostLeft(false); });
-    socket.on('user-joined', d => d.members && setMembers(d.members));
-    socket.on('user-left', d => setMembers(list => list.filter(u => u.socketId !== d.socketId)));
-    socket.on('host-left', () => { setHostLeft(true); setHostLoaded(false); setStreamConnected(false); rtcRef.current?.closeAll(); viewerInitRef.current = false; });
-    socket.on('host-changed', d => { setHostLeft(true); setMembers(d.members || []); setIsHost(d.hostId === socket.id); setHostLoaded(false); setStreamConnected(false); viewerInitRef.current = false; hostInitRef.current = false; rtcRef.current?.closeAll(); });
-    socket.on('host-loaded-video', () => setHostLoaded(true));
-    socket.on('host-stream-ready', d => { if (d.roomId === roomRef.current) { setHostLoaded(true); setStreamConnected(false); viewerInitRef.current = false; } });
-    socket.on('heartbeat', d => { if (d.roomId === roomRef.current && !hostRef.current) hbRef.current = d.time; });
-    socket.on('chat', d => setMessages(list => [...list, d]));
-    socket.on('disconnect', () => setSyncText('Disconnected'));
-    return () => { socket.off('connect', onConnect); socket.off('room-joined'); socket.off('user-joined'); socket.off('user-left'); socket.off('host-left'); socket.off('host-changed'); socket.off('host-loaded-video'); socket.off('host-stream-ready'); socket.off('heartbeat'); socket.off('chat'); socket.off('disconnect'); };
-  }, []);
+    const onRoomJoined = (data) => {
+      mySocketIdRef.current = socket.id;
+      setMySocketId(socket.id);
+      setMembers(data.members);
+      setIsHost(data.hostId === socket.id);
+    };
 
-  useEffect(() => { if (!joined || !roomId || !videoRef.current) return; syncRef.current?.destroy(); syncRef.current = new SyncEngine(socket, videoRef.current, isHost, setSyncText); syncRef.current.attach(roomId); return () => syncRef.current?.destroy(); }, [joined, roomId, isHost]);
-  useEffect(() => { if (!joined) return; rtcRef.current?.closeAll(); rtcRef.current = new WebRTCManager(socket, isHost, { onPeerCountChange: setViewerCount, onStreamReceived: () => { setStreamConnected(true); setManualFallback(false); }, onUnsupported: msg => { setError(msg); if (!isHost) setManualFallback(true); }, onConnectionFailed: msg => { setError(msg); setManualFallback(true); setStreamConnected(false); viewerInitRef.current = false; videoRef.current && (videoRef.current.srcObject = null); } }); rtcRef.current.setRoomId(roomId); viewerInitRef.current = false; hostInitRef.current = false; return () => rtcRef.current?.closeAll(); }, [joined, roomId, isHost]);
-  useEffect(() => { if (debugOpen && rtcRef.current) { const t = setInterval(async () => { setDebugPeers(rtcRef.current.getDebugState()); setDebugStats(await rtcRef.current.collectStats()); }, 2000); return () => clearInterval(t); } }, [debugOpen, joined]);
-  useEffect(() => { if (!joined || isHost || !hostLoaded || manualFallback || streamConnected || viewerInitRef.current || !videoRef.current) return; viewerInitRef.current = true; rtcRef.current?.initViewer(videoRef.current, roomId); }, [joined, isHost, hostLoaded, manualFallback, streamConnected, roomId]);
-  useEffect(() => { if (joined && isHost && videoSrc && videoRef.current && !hostInitRef.current && videoRef.current.readyState >= 1) { hostInitRef.current = !!rtcRef.current?.initHost(videoRef.current, roomId); } }, [joined, isHost, videoSrc, roomId]);
-  useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
+    const onUserJoined = (data) => {
+      setMembers(data.members);
+    };
 
-  const startRoom = type => { setError(''); const payload = { username: username.trim() || 'Guest' }, joinPayload = { roomId: joinRoomId.trim().toUpperCase(), username: payload.username }; socket.emit(type, type === 'create-room' ? payload : joinPayload, res => { if (!res?.ok) return setError(res?.error || 'Unable to join room'); setRoomId(res.roomId); setMembers(res.members || []); setJoined(true); setIsHost(type === 'create-room'); setHostLoaded(!!res.streamReady); setManualFallback(false); setStreamConnected(false); }); };
-  const onFile = e => { const file = e.target.files?.[0]; if (!file || !videoRef.current) return; if (urlRef.current) URL.revokeObjectURL(urlRef.current); const url = URL.createObjectURL(file); urlRef.current = url; setVideoSrc(url); setStreamConnected(false); setManualFallback(false); setHostLoaded(false); hostInitRef.current = false; viewerInitRef.current = false; videoRef.current.srcObject = null; videoRef.current.onloadedmetadata = () => { if (rtcRef.current?.initHost(videoRef.current, roomRef.current)) hostInitRef.current = true; }; };
-  const sendMessage = () => { const text = message.trim(); if (!text || !roomId) return; socket.emit('chat', { roomId, message: text, username: username.trim() || 'Guest' }); setMessage(''); };
-  const copyRoom = async () => { await navigator.clipboard.writeText(roomId); setCopied(true); setTimeout(() => setCopied(false), 1000); };
-  const streamText = isHost ? `Streaming to ${viewerCount} viewers` : streamConnected ? 'Stream connected ✓' : hostLoaded ? 'Connecting to host stream...' : 'Waiting for host to load video...';
-  const drift = hostRef.current ? 0 : Math.abs((videoRef.current?.currentTime || 0) - (hbRef.current || 0)).toFixed(2);
+    const onUserLeft = (data) => {
+      setMembers(m => m.filter(x => x.socketId !== data.socketId));
+    };
 
-  if (!joined) return <div className={styles.shell}><div className={styles.card}><h1>Watch Together</h1><p>Phase 1 sync engine. Load the same local file on every device and let the host drive playback.</p><input placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} /><div className={styles.row}><button onClick={() => startRoom('create-room')}>Create Room</button><input placeholder="Room ID" value={joinRoomId} onChange={e => setJoinRoomId(e.target.value)} /><button onClick={() => startRoom('join-room')}>Join Room</button></div>{error && <p className={styles.error}>{error}</p>}</div></div>;
+    const onHostChanged = (data) => {
+      setIsHost(data.hostId === socket.id);
+      setMembers(data.members);
+      setHostLeft(true);
+      setStreamConnected(false);
+      setStreamReady(false);
+      viewerInitRef.current = false;
+    };
 
-  return <div className={styles.shell}><header className={styles.topbar}><div><h1>Room {roomId}</h1><p>{streamText}</p></div><div className={styles.meta}><span>{syncText}</span><span className={styles.badge}>Drift {drift}s</span><button onClick={copyRoom}>{copied ? 'Copied' : 'Copy room'}</button></div></header>{hostLeft && <div className={styles.banner}>Host left the room. Waiting for reassignment.</div>}{error && <div className={styles.banner}>{error}</div>}<main className={styles.grid}><section className={styles.videoPanel}>{(isHost || manualFallback) && <input type="file" accept="video/*" onChange={onFile} />}<div className={styles.videoWrap}><video ref={videoRef} src={(isHost || manualFallback) && videoSrc ? videoSrc : undefined} controls={isHost || manualFallback} autoPlay playsInline muted={false} className={styles.video} style={{ pointerEvents: isHost || manualFallback ? 'auto' : 'none' }} /></div>{!videoSrc && (isHost ? <p className={styles.hint}>Load your local file here.</p> : manualFallback ? <p className={styles.hint}>Direct streaming not supported on this browser. Please load the video file manually.</p> : <p className={styles.hint}>{streamConnected ? 'Stream connected ✓' : hostLoaded ? 'Connecting to host stream...' : 'Waiting for host to load video...'}</p>)}</section><aside className={styles.side}><section className={styles.card}><h2>People</h2><ul>{members.map(u => <li key={u.socketId}>{u.username}{u.socketId === me ? ' (you)' : ''}{u.isHost ? ' · host' : ''}</li>)}</ul></section><section className={styles.card}><h2>Chat</h2><div className={styles.chat}>{messages.map((m, i) => <div key={i}><strong>{m.username || 'Guest'}:</strong> {m.message}</div>)}</div><div className={styles.row}><input value={message} onChange={e => setMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Send a message" /><button onClick={sendMessage}>Send</button></div></section></aside></main>{debugOpen && <section className={styles.debugPanel}><h2>Debug</h2><div>Peers: {debugPeers.length}</div><div>{debugStats.map(p => <div key={p.id}>{p.id}: {p.state} sent {p.bytesSent} recv {p.bytesReceived}</div>)}</div></section>}</div>;
+    const onHostLeft = () => {
+      setHostLeft(true);
+      setStreamConnected(false);
+      setStreamReady(false);
+      viewerInitRef.current = false;
+    };
+
+    const onChat = (data) => {
+      setMessages(m => [...m, { socketId: data.socketId, username: data.socketId === socket.id ? username : (members.find(x => x.socketId === data.socketId)?.username || 'Guest'), text: data.text, ts: data.ts }]);
+    };
+
+    const onHostLoadedVideo = () => {
+      setHostLoaded(true);
+    };
+
+    const onHostStreamReady = () => {
+      setStreamReady(true);
+    };
+
+    const onCamState = (data) => {
+      setMediaState(data.socketId, { camOn: !!data.on });
+    };
+
+    const onMicState = (data) => {
+      setMediaState(data.socketId, { micMuted: !!data.muted });
+    };
+
+    socket.on('room-joined', onRoomJoined);
+    socket.on('user-joined', onUserJoined);
+    socket.on('user-left', onUserLeft);
+    socket.on('host-changed', onHostChanged);
+    socket.on('host-left', onHostLeft);
+    socket.on('chat', onChat);
+    socket.on('host-loaded-video', onHostLoadedVideo);
+    socket.on('host-stream-ready', onHostStreamReady);
+    socket.on('cam-state', onCamState);
+    socket.on('mic-state', onMicState);
+
+    return () => {
+      socket.off('room-joined', onRoomJoined);
+      socket.off('user-joined', onUserJoined);
+      socket.off('user-left', onUserLeft);
+      socket.off('host-changed', onHostChanged);
+      socket.off('host-left', onHostLeft);
+      socket.off('chat', onChat);
+      socket.off('host-loaded-video', onHostLoadedVideo);
+      socket.off('host-stream-ready', onHostStreamReady);
+      socket.off('cam-state', onCamState);
+      socket.off('mic-state', onMicState);
+    };
+  }, [joined, username, members]);
+
+  useEffect(() => {
+    if (!joined || !roomId || !videoRef.current) return;
+    syncEngineRef.current?.destroy();
+    syncEngineRef.current = new SyncEngine(socket, videoRef.current, isHost, setSyncText);
+    syncEngineRef.current.attach(roomId);
+    return () => syncEngineRef.current?.destroy();
+  }, [joined, roomId, isHost]);
+
+  useEffect(() => {
+    if (!joined) return;
+
+    webrtcRef.current?.closeAll();
+    webrtcRef.current = new WebRTCManager(socket, isHost, {
+      onPeerCountChange: setViewerCount,
+      onStreamReceived: () => setStreamConnected(true),
+      onConnectionFailed: (msg) => setError(msg)
+    });
+    webrtcRef.current.setRoomId(roomId);
+
+
+    const debugInterval = setInterval(async () => {
+      if (webrtcRef.current && debugOpen) {
+        const peers = await webrtcRef.current.collectStats();
+        setDebugPeers(peers);
+      }
+    }, 1000);
+
+    const keydownListener = (e) => {
+      if (e.ctrlKey && e.shiftKey && e.code === 'KeyD') {
+        e.preventDefault();
+        setDebugOpen(d => !d);
+      }
+    };
+
+    window.addEventListener('keydown', keydownListener);
+
+    return () => {
+      clearInterval(debugInterval);
+      window.removeEventListener('keydown', keydownListener);
+      webrtcRef.current?.closeAll();
+    };
+  }, [joined, roomId, isHost]);
+
+  useEffect(() => {
+    if (isHost || !streamReady || !webrtcRef.current || !videoRef.current) return;
+    if (viewerInitRef.current) return;
+    viewerInitRef.current = true;
+    webrtcRef.current.initViewer(videoRef.current, roomId);
+  }, [isHost, streamReady, roomId]);
+
+  useEffect(() => {
+    if (isHost && videoRef.current && !manualFallback && videoSrc) {
+      videoRef.current.play?.().catch(() => {});
+    }
+  }, [isHost, videoSrc, manualFallback]);
+
+  useEffect(() => {
+    if (!streamReady) viewerInitRef.current = false;
+  }, [streamReady]);
+
+  if (!joined) {
+    return (
+      <div className={styles.shell}>
+        <LobbyScreen
+          onCreateRoom={onCreateRoom}
+          onJoinRoom={onJoinRoom}
+          error={error}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.shell}>
+      {error && <div className={styles.errorBanner}>{error}</div>}
+      <RoomScreen
+        roomId={roomId}
+        isHost={isHost}
+        members={members}
+        videoRef={videoRef}
+        videoSrc={videoSrc}
+        streamConnected={streamConnected}
+        hostLoaded={hostLoaded}
+        manualFallback={manualFallback}
+        syncText={syncText}
+        messages={messages}
+        username={username}
+        copied={copied}
+        error={error}
+        hostLeft={hostLeft}
+        viewerCount={viewerCount}
+        debugOpen={debugOpen}
+        debugPeers={debugPeers}
+        participants={generateParticipants()}
+        camOn={camOn}
+        micMuted={micMuted}
+        speakingVolume={speakingVolume}
+        mySocketId={mySocketId}
+        mediaStates={mediaStates}
+        onFileSelect={onFileSelect}
+        onSendMessage={onSendMessage}
+        onCopyRoom={onCopyRoom}
+        onLeaveRoom={onLeaveRoom}
+        onQualityChange={onQualityChange}
+        onToggleMic={onToggleMic}
+        onToggleCam={onToggleCam}
+      />
+    </div>
+  );
 }
